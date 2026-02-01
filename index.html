@@ -135,6 +135,11 @@
       dayBefore.setDate(dayBefore.getDate() - 1);
       directorHolidays[formatDate(dayBefore)] = electionDayLegal ? "Day before Thanksgiving (tradeable)" : "Wednesday before Thanksgiving";
 
+      // When Election Day is NOT a legal holiday, add it as a Director's Holiday instead (5 total)
+      if (!electionDayLegal) {
+        directorHolidays[formatDate(getElectionDay(startYear))] = "Election Day (Director's Holiday)";
+      }
+
       const numLegal = Object.keys(legalHolidays).length;
       const numDirector = Object.keys(directorHolidays).length;
 
