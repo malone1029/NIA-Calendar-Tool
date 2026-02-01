@@ -217,7 +217,8 @@
       for (let i = 0; i < startPadding; i++) days.push(null);
       for (let d = 1; d <= lastDay.getDate(); d++) days.push(d);
 
-      const getDayType = (day) => {
+      // Get original day type (before any change requests)
+      const getOriginalDayType = (day) => {
         if (!day) return null;
         const dateStr = formatDate(new Date(year, month, day));
         const date = new Date(year, month, day);
@@ -232,7 +233,29 @@
         return 'work';
       };
 
-      const getEventName = (day) => {
+      // Get change request for a specific day
+      const getChangeRequest = (day) => {
+        if (!day) return null;
+        const dateStr = formatDate(new Date(year, month, day));
+        return changeRequests.find(r => r.date === dateStr && r.calendarType === calendarType);
+      };
+
+      // Get effective day type (after applying change requests)
+      const getDayType = (day) => {
+        const originalType = getOriginalDayType(day);
+        const changeReq = getChangeRequest(day);
+
+        if (changeReq) {
+          // Parse the requested type from the action
+          if (changeReq.action.includes('Work Day')) return 'work';
+          if (changeReq.action.includes('NR Day')) return 'nr';
+          if (changeReq.action.includes("Director's Holiday")) return 'director';
+        }
+        return originalType;
+      };
+
+      // Get original event name
+      const getOriginalEventName = (day) => {
         if (!day) return null;
         const dateStr = formatDate(new Date(year, month, day));
         if (calendarData.legalHolidays[dateStr]) return calendarData.legalHolidays[dateStr];
@@ -243,10 +266,16 @@
         return null;
       };
 
-      const hasChangeRequest = (day) => {
-        if (!day) return false;
-        const dateStr = formatDate(new Date(year, month, day));
-        return changeRequests.some(r => r.date === dateStr && r.calendarType === calendarType);
+      // Get effective event name (after applying change requests)
+      const getEventName = (day) => {
+        const changeReq = getChangeRequest(day);
+
+        if (changeReq) {
+          if (changeReq.action.includes('Work Day')) return null; // Work days have no event name
+          if (changeReq.action.includes('NR Day')) return 'NR Day';
+          if (changeReq.action.includes("Director's Holiday")) return "Director's Holiday";
+        }
+        return getOriginalEventName(day);
       };
 
       const typeColors = {
@@ -271,18 +300,20 @@
             ))}
             {days.map((day, i) => {
               const dayType = getDayType(day);
+              const originalType = getOriginalDayType(day);
               const eventName = getEventName(day);
-              const hasRequest = hasChangeRequest(day);
+              const changeReq = getChangeRequest(day);
+              const wasChanged = changeReq && dayType !== originalType;
 
               return (
                 <div
                   key={i}
-                  className={`relative text-center py-1 rounded ${day ? typeColors[dayType] : ''} ${hasRequest ? 'ring-2 ring-red-500' : ''}`}
+                  className={`relative text-center py-1 rounded ${day ? typeColors[dayType] : ''} ${wasChanged ? 'ring-2 ring-red-500' : ''}`}
                   title={eventName || ''}
-                  onClick={() => day && dayType !== 'weekend' && dayType !== 'legal' && onRequestChange(formatDate(new Date(year, month, day)), calendarType, dayType, eventName)}
+                  onClick={() => day && dayType !== 'weekend' && originalType !== 'legal' && onRequestChange(formatDate(new Date(year, month, day)), calendarType, originalType, getOriginalEventName(day))}
                 >
                   {day}
-                  {hasRequest && (
+                  {wasChanged && (
                     <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full flex items-center justify-center">
                       <span className="w-2 h-2 text-white text-[6px]">!</span>
                     </span>
@@ -294,13 +325,13 @@
 
           <div className="mt-2 text-xs space-y-1">
             {days.filter(d => d && getEventName(d)).map(day => {
-              const dateStr = formatDate(new Date(year, month, day));
               const eventName = getEventName(day);
               const dayType = getDayType(day);
+              const changeReq = getChangeRequest(day);
               const colorClass = dayType === 'legal' ? 'text-nia-orange' : dayType === 'director' ? 'text-nia-green' : 'text-yellow-600';
               return (
-                <div key={day} className={`${colorClass} truncate`}>
-                  {day}: {eventName}
+                <div key={day} className={`${colorClass} truncate ${changeReq ? 'font-semibold' : ''}`}>
+                  {day}: {eventName} {changeReq ? '(changed)' : ''}
                 </div>
               );
             })}
