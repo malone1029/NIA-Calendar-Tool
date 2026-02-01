@@ -1,0 +1,1555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NIA Annual Calendar Review Tool</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'nia-grey-blue': '#55787c',
+            'nia-orange': '#f79935',
+            'nia-green': '#b1bd37',
+            'nia-dark': '#324a4d',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .lucide { width: 1em; height: 1em; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    // Icon components
+    const CalendarIcon = () => (
+      <svg className="lucide" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+    );
+    const DownloadIcon = () => (
+      <svg className="lucide" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+    );
+    const MessageSquareIcon = () => (
+      <svg className="lucide" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    );
+    const XIcon = () => (
+      <svg className="lucide" viewBox="0 0 24 24"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+    );
+    const BriefcaseIcon = () => (
+      <svg className="lucide" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+    );
+    const ClockIcon = () => (
+      <svg className="lucide" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    );
+    const FileSpreadsheetIcon = () => (
+      <svg className="lucide" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg>
+    );
+
+    // Calendar calculation functions
+    const getWeekdayCount = (startDate, endDate) => {
+      let count = 0;
+      let current = new Date(startDate);
+      while (current <= endDate) {
+        if (current.getDay() !== 0 && current.getDay() !== 6) count++;
+        current.setDate(current.getDate() + 1);
+      }
+      return count;
+    };
+
+    const getHolidayDate = (year, month, weekday, occurrence) => {
+      const firstDay = new Date(year, month, 1);
+      const firstWeekday = firstDay.getDay();
+      const daysUntil = (weekday - firstWeekday + 7) % 7;
+      const firstOccurrence = new Date(year, month, 1 + daysUntil);
+      return new Date(firstOccurrence.getTime() + (occurrence - 1) * 7 * 24 * 60 * 60 * 1000);
+    };
+
+    const getLastWeekdayInMonth = (year, month, weekday) => {
+      const lastDay = new Date(year, month + 1, 0);
+      const daysBack = (lastDay.getDay() - weekday + 7) % 7;
+      return new Date(year, month + 1, -daysBack);
+    };
+
+    const observeWeekendHoliday = (d) => {
+      const date = new Date(d);
+      if (date.getDay() === 6) date.setDate(date.getDate() - 1);
+      else if (date.getDay() === 0) date.setDate(date.getDate() + 1);
+      return date;
+    };
+
+    const getElectionDay = (year) => {
+      const firstDay = new Date(year, 10, 1);
+      const daysToMonday = (1 - firstDay.getDay() + 7) % 7;
+      const firstMonday = new Date(year, 10, 1 + daysToMonday);
+      return new Date(firstMonday.getTime() + 24 * 60 * 60 * 1000);
+    };
+
+    const getThanksgiving = (year) => getHolidayDate(year, 10, 4, 4);
+
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    const parseDate = (s) => new Date(s + 'T00:00:00');
+
+    const calculateFYCalendar = (fiscalYear, electionDayLegal, springBreakStart) => {
+      const startYear = fiscalYear - 1;
+      const endYear = fiscalYear;
+      const fyStart = new Date(startYear, 6, 1);
+      const fyEnd = new Date(endYear, 5, 30);
+      const availableDays = getWeekdayCount(fyStart, fyEnd);
+
+      const legalHolidays = {};
+      legalHolidays[formatDate(observeWeekendHoliday(new Date(startYear, 6, 4)))] = "Independence Day";
+      legalHolidays[formatDate(observeWeekendHoliday(new Date(startYear, 11, 25)))] = "Christmas";
+      legalHolidays[formatDate(observeWeekendHoliday(new Date(endYear, 0, 1)))] = "New Year's Day";
+      legalHolidays[formatDate(observeWeekendHoliday(new Date(endYear, 5, 19)))] = "Juneteenth";
+      legalHolidays[formatDate(getHolidayDate(startYear, 8, 1, 1))] = "Labor Day";
+      legalHolidays[formatDate(getHolidayDate(startYear, 9, 1, 2))] = "Columbus Day";
+      legalHolidays[formatDate(getThanksgiving(startYear))] = "Thanksgiving";
+      legalHolidays[formatDate(getHolidayDate(endYear, 0, 1, 3))] = "MLK Day";
+      legalHolidays[formatDate(getHolidayDate(endYear, 1, 1, 3))] = "Presidents' Day";
+      legalHolidays[formatDate(getLastWeekdayInMonth(endYear, 4, 1))] = "Memorial Day";
+
+      if (electionDayLegal) {
+        legalHolidays[formatDate(getElectionDay(startYear))] = "Election Day";
+      }
+
+      const thanksgiving = getThanksgiving(startYear);
+      const directorHolidays = {};
+      const dayAfter = new Date(thanksgiving);
+      dayAfter.setDate(dayAfter.getDate() + 1);
+      directorHolidays[formatDate(dayAfter)] = "Day after Thanksgiving";
+      directorHolidays[formatDate(new Date(startYear, 11, 24))] = "Christmas Eve";
+      directorHolidays[formatDate(new Date(startYear, 11, 31))] = "New Year's Eve";
+
+      const dayBefore = new Date(thanksgiving);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      directorHolidays[formatDate(dayBefore)] = electionDayLegal ? "Day before Thanksgiving (tradeable)" : "Wednesday before Thanksgiving";
+
+      const numLegal = Object.keys(legalHolidays).length;
+      const numDirector = Object.keys(directorHolidays).length;
+
+      const aaContract = 256;
+      const aaNR = availableDays - aaContract;
+      const aaWork = aaContract - numLegal - numDirector;
+
+      const opContract = 250;
+      const opNR = availableDays - opContract;
+      const opWork = opContract - numLegal - numDirector;
+
+      let aaNRDays = [];
+      const winterCandidates = [
+        new Date(startYear, 11, 22), new Date(startYear, 11, 23),
+        new Date(startYear, 11, 28), new Date(startYear, 11, 29), new Date(startYear, 11, 30)
+      ];
+
+      for (const d of winterCandidates) {
+        if (aaNRDays.length >= aaNR) break;
+        const dateStr = formatDate(d);
+        if (d.getDay() !== 0 && d.getDay() !== 6 && !legalHolidays[dateStr] && !directorHolidays[dateStr]) {
+          aaNRDays.push(dateStr);
+        }
+      }
+
+      let opNRDays = [];
+      const springStart = parseDate(springBreakStart);
+      let current = new Date(springStart);
+      let springCount = 0;
+      while (springCount < 5) {
+        if (current.getDay() !== 0 && current.getDay() !== 6) {
+          opNRDays.push(formatDate(current));
+          springCount++;
+        }
+        current.setDate(current.getDate() + 1);
+      }
+
+      const winterOpCandidates = [
+        new Date(startYear, 11, 21), new Date(startYear, 11, 22), new Date(startYear, 11, 23),
+        new Date(startYear, 11, 28), new Date(startYear, 11, 29), new Date(startYear, 11, 30)
+      ];
+
+      for (const d of winterOpCandidates) {
+        if (opNRDays.length >= opNR) break;
+        const dateStr = formatDate(d);
+        if (d.getDay() !== 0 && d.getDay() !== 6 && !legalHolidays[dateStr] && !directorHolidays[dateStr]) {
+          opNRDays.push(dateStr);
+        }
+      }
+
+      return {
+        fiscalYear: `FY${fiscalYear}`,
+        dateRange: { start: fyStart, end: fyEnd },
+        availableWorkDays: availableDays,
+        electionDayLegal,
+        legalHolidays,
+        directorHolidays,
+        numLegalHolidays: numLegal,
+        numDirectorHolidays: numDirector,
+        calendars: {
+          aa: { contractDays: aaContract, workDays: aaWork, nrDays: aaNR, nrDates: aaNRDays.sort() },
+          op: { contractDays: opContract, workDays: opWork, nrDays: opNR, nrDates: opNRDays.sort(), springBreakStart }
+        }
+      };
+    };
+
+    // Month calendar component
+    const MonthCalendar = ({ year, month, calendarData, calendarType, changeRequests, onRequestChange }) => {
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      const startPadding = firstDay.getDay();
+
+      const days = [];
+      for (let i = 0; i < startPadding; i++) days.push(null);
+      for (let d = 1; d <= lastDay.getDate(); d++) days.push(d);
+
+      const getDayType = (day) => {
+        if (!day) return null;
+        const dateStr = formatDate(new Date(year, month, day));
+        const date = new Date(year, month, day);
+
+        if (date.getDay() === 0 || date.getDay() === 6) return 'weekend';
+        if (calendarData.legalHolidays[dateStr]) return 'legal';
+        if (calendarData.directorHolidays[dateStr]) return 'director';
+
+        const nrDates = calendarType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates;
+        if (nrDates.includes(dateStr)) return 'nr';
+
+        return 'work';
+      };
+
+      const getEventName = (day) => {
+        if (!day) return null;
+        const dateStr = formatDate(new Date(year, month, day));
+        if (calendarData.legalHolidays[dateStr]) return calendarData.legalHolidays[dateStr];
+        if (calendarData.directorHolidays[dateStr]) return calendarData.directorHolidays[dateStr];
+
+        const nrDates = calendarType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates;
+        if (nrDates.includes(dateStr)) return 'NR Day';
+        return null;
+      };
+
+      const hasChangeRequest = (day) => {
+        if (!day) return false;
+        const dateStr = formatDate(new Date(year, month, day));
+        return changeRequests.some(r => r.date === dateStr && r.calendarType === calendarType);
+      };
+
+      const typeColors = {
+        weekend: 'bg-gray-200 text-gray-500',
+        legal: 'bg-nia-orange text-white',
+        director: 'bg-nia-green text-nia-dark cursor-pointer hover:opacity-80',
+        nr: 'bg-yellow-400 text-gray-800 cursor-pointer hover:opacity-80',
+        work: 'bg-white hover:bg-nia-grey-blue hover:bg-opacity-10 cursor-pointer'
+      };
+
+      const workDaysInMonth = days.filter(d => d && getDayType(d) === 'work').length;
+
+      return (
+        <div className="bg-white rounded-lg shadow p-3">
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="font-semibold text-gray-800">{monthNames[month]} {year}</h3>
+            <span className="text-xs text-gray-500">{workDaysInMonth} work days</span>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-xs">
+            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
+              <div key={d} className="text-center font-medium text-gray-500 py-1">{d}</div>
+            ))}
+            {days.map((day, i) => {
+              const dayType = getDayType(day);
+              const eventName = getEventName(day);
+              const hasRequest = hasChangeRequest(day);
+
+              return (
+                <div
+                  key={i}
+                  className={`relative text-center py-1 rounded ${day ? typeColors[dayType] : ''} ${hasRequest ? 'ring-2 ring-red-500' : ''}`}
+                  title={eventName || ''}
+                  onClick={() => day && dayType !== 'weekend' && dayType !== 'legal' && onRequestChange(formatDate(new Date(year, month, day)), calendarType, dayType, eventName)}
+                >
+                  {day}
+                  {hasRequest && (
+                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full flex items-center justify-center">
+                      <span className="w-2 h-2 text-white text-[6px]">!</span>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-2 text-xs space-y-1">
+            {days.filter(d => d && getEventName(d)).map(day => {
+              const dateStr = formatDate(new Date(year, month, day));
+              const eventName = getEventName(day);
+              const dayType = getDayType(day);
+              const colorClass = dayType === 'legal' ? 'text-nia-orange' : dayType === 'director' ? 'text-nia-green' : 'text-yellow-600';
+              return (
+                <div key={day} className={`${colorClass} truncate`}>
+                  {day}: {eventName}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    // Change request panel
+    const ChangeRequestPanel = ({ requests, onRemove }) => {
+      if (requests.length === 0) return null;
+
+      return (
+        <div className="bg-red-50 border-2 border-red-500 border-opacity-30 rounded-lg p-4 mt-4">
+          <h3 className="font-semibold text-nia-dark flex items-center gap-2 mb-3">
+            <span className="w-5 h-5 text-red-500"><MessageSquareIcon /></span>
+            Change Requests ({requests.length})
+          </h3>
+          <div className="space-y-2">
+            {requests.map((req, i) => (
+              <div key={i} className="bg-white rounded p-3 flex items-start gap-3">
+                <div className="flex-1">
+                  <div className="font-medium text-sm flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${
+                      req.dayType === 'nr' ? 'bg-yellow-400' :
+                      req.dayType === 'director' ? 'bg-nia-green' :
+                      'bg-gray-300'
+                    }`}></span>
+                    {req.calendarType.toUpperCase()}: {req.date}
+                    {req.eventName && <span className="text-gray-500 font-normal">({req.eventName})</span>}
+                  </div>
+                  <div className="text-sm text-gray-600 mt-1">{req.action}</div>
+                  {req.comment && (
+                    <div className="text-sm text-gray-500 mt-1 italic">"{req.comment}"</div>
+                  )}
+                </div>
+                <button onClick={() => onRemove(i)} className="text-gray-400 hover:text-red-500 w-4 h-4">
+                  <XIcon />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    // Summary table
+    const SummaryTable = ({ calendarData, type, changeRequests }) => {
+      const baseData = type === 'aa' ? calendarData.calendars.aa : calendarData.calendars.op;
+      const title = type === 'aa' ? '256-Day (Administrative)' : '250-Day (Office Professional)';
+
+      // Calculate adjustments based on pending change requests
+      const relevantRequests = changeRequests.filter(r => r.calendarType === type);
+      let nrAdjustment = 0;
+      let directorAdjustment = 0;
+
+      relevantRequests.forEach(req => {
+        // Check what the day is changing FROM and TO
+        const fromType = req.dayType;
+        const toType = req.action.includes('NR Day') ? 'nr' :
+                       req.action.includes('Work Day') ? 'work' :
+                       req.action.includes("Director's Holiday") ? 'director' : 'other';
+
+        // Adjust NR count
+        if (fromType === 'work' && toType === 'nr') {
+          nrAdjustment += 1; // Adding an NR day
+        } else if (fromType === 'nr' && toType === 'work') {
+          nrAdjustment -= 1; // Removing an NR day
+        }
+
+        // Adjust Director's count
+        if (fromType === 'work' && toType === 'director') {
+          directorAdjustment += 1;
+        } else if (fromType === 'director' && toType === 'work') {
+          directorAdjustment -= 1;
+        }
+      });
+
+      // Adjusted values
+      const adjustedNRDays = baseData.nrDays + nrAdjustment;
+      const adjustedDirectorDays = calendarData.numDirectorHolidays + directorAdjustment;
+      const adjustedWorkDays = baseData.workDays - nrAdjustment - directorAdjustment;
+      const adjustedContractDays = baseData.contractDays - nrAdjustment - directorAdjustment;
+      const hasChanges = nrAdjustment !== 0 || directorAdjustment !== 0;
+
+      // Get list of pending NR day additions
+      const pendingNRAdditions = relevantRequests
+        .filter(r => r.dayType === 'work' && r.action.includes('NR Day'))
+        .map(r => r.date);
+
+      // Get list of pending NR day removals
+      const pendingNRRemovals = relevantRequests
+        .filter(r => r.dayType === 'nr' && r.action.includes('Work Day'))
+        .map(r => r.date);
+
+      return (
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-semibold text-gray-800">{title}</h3>
+            {hasChanges && (
+              <span className="text-xs bg-red-500 text-white px-2 py-1 rounded">
+                Pending Changes
+              </span>
+            )}
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              <tr className="border-b">
+                <td className="py-2">Work Days</td>
+                <td className="py-2 text-right font-medium">
+                  {hasChanges ? (
+                    <span>
+                      <span className="text-gray-400 line-through mr-2">{baseData.workDays}</span>
+                      <span className="text-red-600">{adjustedWorkDays}</span>
+                    </span>
+                  ) : baseData.workDays}
+                </td>
+              </tr>
+              <tr className="border-b">
+                <td className="py-2 flex items-center gap-2">
+                  <span className="w-3 h-3 bg-nia-orange rounded"></span> Legal Holidays
+                </td>
+                <td className="py-2 text-right font-medium">{calendarData.numLegalHolidays}</td>
+              </tr>
+              <tr className="border-b">
+                <td className="py-2 flex items-center gap-2">
+                  <span className="w-3 h-3 bg-nia-green rounded"></span> Director's Holidays
+                </td>
+                <td className="py-2 text-right font-medium">
+                  {directorAdjustment !== 0 ? (
+                    <span>
+                      <span className="text-gray-400 line-through mr-2">{calendarData.numDirectorHolidays}</span>
+                      <span className="text-red-600">{adjustedDirectorDays}</span>
+                    </span>
+                  ) : calendarData.numDirectorHolidays}
+                </td>
+              </tr>
+              <tr className="border-b">
+                <td className="py-2 flex items-center gap-2">
+                  <span className="w-3 h-3 bg-yellow-400 rounded"></span> NR Days
+                </td>
+                <td className="py-2 text-right font-medium">
+                  {hasChanges ? (
+                    <span>
+                      <span className="text-gray-400 line-through mr-2">{baseData.nrDays}</span>
+                      <span className="text-red-600">{adjustedNRDays}</span>
+                    </span>
+                  ) : baseData.nrDays}
+                </td>
+              </tr>
+              <tr className="font-bold">
+                <td className="py-2">Total Contract Days</td>
+                <td className="py-2 text-right">
+                  {hasChanges ? (
+                    <span>
+                      <span className="text-gray-400 line-through mr-2">{baseData.contractDays}</span>
+                      <span className="text-red-600">{adjustedContractDays}</span>
+                    </span>
+                  ) : baseData.contractDays}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div className="mt-3 pt-3 border-t">
+            <div className="text-xs text-gray-600 font-medium mb-2">NR Day Assignments:</div>
+            <div className="flex flex-wrap gap-1">
+              {baseData.nrDates.map(date => {
+                const isBeingRemoved = pendingNRRemovals.includes(date);
+                return (
+                  <span key={date} className={`text-xs px-2 py-1 rounded ${isBeingRemoved ? 'bg-gray-200 text-gray-400 line-through' : 'bg-yellow-100 text-yellow-800'}`}>
+                    {new Date(date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
+                );
+              })}
+              {pendingNRAdditions.map(date => (
+                <span key={date} className="bg-red-500 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                  + {new Date(date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Main component
+    function NIACalendarReviewTool() {
+      const currentYear = new Date().getFullYear();
+      const [fiscalYear, setFiscalYear] = useState(currentYear + 1);
+      const [electionDayLegal, setElectionDayLegal] = useState(true);
+      // Spring break should be in the END year of the fiscal year (e.g., FY2027 = July 2026 - June 2027, so spring break is March 2027)
+      const [springBreakStart, setSpringBreakStart] = useState(`${currentYear + 1}-03-24`);
+      const [activeTab, setActiveTab] = useState('aa');
+      const [changeRequests, setChangeRequests] = useState([]);
+      const [showRequestModal, setShowRequestModal] = useState(null);
+      const [requestComment, setRequestComment] = useState('');
+      const [requestAction, setRequestAction] = useState('make-nr');
+
+      // Update spring break year when fiscal year changes
+      const handleFiscalYearChange = (newFY) => {
+        setFiscalYear(newFY);
+        // Update spring break to be in the new fiscal year's end year
+        const currentSpringDate = springBreakStart.slice(5); // Get MM-DD part
+        setSpringBreakStart(`${newFY}-${currentSpringDate}`);
+      };
+
+      const calendarData = useMemo(() =>
+        calculateFYCalendar(fiscalYear, electionDayLegal, springBreakStart),
+        [fiscalYear, electionDayLegal, springBreakStart]
+      );
+
+      const handleRequestChange = (date, calendarType, dayType, eventName) => {
+        setShowRequestModal({ date, calendarType, dayType, eventName });
+        setRequestComment('');
+        // Default to most likely desired change
+        if (dayType === 'work') {
+          setRequestAction('nr'); // Work days usually want to become NR
+        } else if (dayType === 'nr') {
+          setRequestAction('work'); // NR days might want to become work days
+        } else if (dayType === 'director') {
+          setRequestAction('work'); // Director's holidays might want to move
+        } else {
+          setRequestAction('nr');
+        }
+      };
+
+      const getActionLabel = (action, currentType) => {
+        const labels = {
+          'work': 'Change to: Work Day',
+          'nr': 'Change to: NR Day',
+          'director': "Change to: Director's Holiday",
+          'other': 'Other change request'
+        };
+        return labels[action] || action;
+      };
+
+      const submitChangeRequest = () => {
+        if (showRequestModal) {
+          setChangeRequests([...changeRequests, {
+            date: showRequestModal.date,
+            calendarType: showRequestModal.calendarType,
+            dayType: showRequestModal.dayType,
+            eventName: showRequestModal.eventName,
+            action: getActionLabel(requestAction),
+            comment: requestComment
+          }]);
+          setShowRequestModal(null);
+        }
+      };
+
+      const removeRequest = (index) => {
+        setChangeRequests(changeRequests.filter((_, i) => i !== index));
+      };
+
+      // Color definitions for Excel
+      const EXCEL_COLORS = {
+        legal: { bg: 'FFF79935', font: 'FFFFFFFF' },      // NIA Orange
+        director: { bg: 'FFB1BD37', font: 'FF324A4D' },   // NIA Green
+        nr: { bg: 'FFFACC15', font: 'FF1F2937' },         // Yellow
+        weekend: { bg: 'FFE5E7EB', font: 'FF6B7280' },    // Gray
+        work: { bg: 'FFFFFFFF', font: 'FF1F2937' },       // White
+        header: { bg: 'FF324A4D', font: 'FFFFFFFF' },     // NIA Dark
+      };
+
+      // Helper to get day type for Excel
+      const getDayTypeForExcel = (dateStr, calType) => {
+        const d = new Date(dateStr + 'T00:00:00');
+        if (d.getDay() === 0 || d.getDay() === 6) return 'weekend';
+        if (calendarData.legalHolidays[dateStr]) return 'legal';
+        if (calendarData.directorHolidays[dateStr]) return 'director';
+        const nrDates = calType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates;
+        if (nrDates.includes(dateStr)) return 'nr';
+        return 'work';
+      };
+
+      const downloadExcel = async () => {
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = 'NIA Calendar Review Tool';
+
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+        const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+        // Create calendar sheet for each type
+        for (const calType of ['aa', 'op']) {
+          const title = calType === 'aa' ? '256-Day (Administrative)' : '250-Day (Office Professional)';
+          const sheetName = calType === 'aa' ? 'AA Calendar' : 'OP Calendar';
+          const calData = calType === 'aa' ? calendarData.calendars.aa : calendarData.calendars.op;
+
+          const sheet = workbook.addWorksheet(sheetName);
+
+          // Set column widths
+          for (let i = 1; i <= 7; i++) sheet.getColumn(i).width = 6;
+          sheet.getColumn(8).width = 2;
+          sheet.getColumn(9).width = 28;
+
+          // Title row
+          sheet.mergeCells('A1:I1');
+          const titleCell = sheet.getCell('A1');
+          titleCell.value = `NIA ${calendarData.fiscalYear} - ${title}`;
+          titleCell.font = { size: 14, bold: true, color: { argb: 'FF324A4D' } };
+          titleCell.alignment = { horizontal: 'left' };
+
+          // Generate months
+          const startYear = fiscalYear - 1;
+          const months = [];
+          for (let m = 6; m < 12; m++) months.push({ year: startYear, month: m });
+          for (let m = 0; m < 6; m++) months.push({ year: fiscalYear, month: m });
+
+          let currentRow = 3;
+
+          months.forEach(({ year, month }) => {
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+
+            // Month title
+            sheet.mergeCells(currentRow, 1, currentRow, 7);
+            const monthCell = sheet.getCell(currentRow, 1);
+            monthCell.value = `${monthNames[month]} ${year}`;
+            monthCell.font = { bold: true, size: 11 };
+
+            sheet.getCell(currentRow, 9).value = 'Events';
+            sheet.getCell(currentRow, 9).font = { bold: true, size: 10 };
+            currentRow++;
+
+            // Day headers
+            for (let i = 0; i < 7; i++) {
+              const cell = sheet.getCell(currentRow, i + 1);
+              cell.value = dayNames[i];
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXCEL_COLORS.header.bg } };
+              cell.font = { bold: true, color: { argb: EXCEL_COLORS.header.font } };
+              cell.alignment = { horizontal: 'center' };
+              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            }
+            currentRow++;
+
+            // Calendar days
+            let col = firstDay.getDay() + 1;
+            let eventRow = currentRow;
+            let workDays = 0;
+
+            // Empty cells before first day
+            for (let i = 1; i < col; i++) {
+              const cell = sheet.getCell(currentRow, i);
+              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            }
+
+            for (let d = 1; d <= lastDay.getDate(); d++) {
+              const dateStr = formatDate(new Date(year, month, d));
+              const dayType = getDayTypeForExcel(dateStr, calType);
+              const colors = EXCEL_COLORS[dayType];
+
+              const cell = sheet.getCell(currentRow, col);
+              cell.value = d;
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.bg } };
+              cell.font = { color: { argb: colors.font }, bold: dayType !== 'work' && dayType !== 'weekend' };
+              cell.alignment = { horizontal: 'center' };
+              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+
+              if (dayType === 'work') workDays++;
+
+              // Add event to sidebar
+              let eventName = null;
+              let eventColor = 'FF000000';
+              if (calendarData.legalHolidays[dateStr]) {
+                eventName = `${d}: ${calendarData.legalHolidays[dateStr]}`;
+                eventColor = 'FFF79935';  // NIA Orange
+              } else if (calendarData.directorHolidays[dateStr]) {
+                eventName = `${d}: ${calendarData.directorHolidays[dateStr]}`;
+                eventColor = 'FF6B8E23';  // Darker green for readability
+              } else if ((calType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates).includes(dateStr)) {
+                eventName = `${d}: NR Day`;
+                eventColor = 'FFCA8A04';
+              }
+
+              if (eventName) {
+                const eventCell = sheet.getCell(eventRow, 9);
+                eventCell.value = eventName;
+                eventCell.font = { size: 9, color: { argb: eventColor } };
+                eventRow++;
+              }
+
+              col++;
+              if (col > 7) {
+                col = 1;
+                currentRow++;
+              }
+            }
+
+            // Fill remaining cells in last row
+            if (col > 1) {
+              for (let i = col; i <= 7; i++) {
+                const cell = sheet.getCell(currentRow, i);
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+              }
+              currentRow++;
+            }
+
+            // Work days count
+            sheet.getCell(currentRow, 1).value = `${workDays} work days`;
+            sheet.getCell(currentRow, 1).font = { size: 9, italic: true };
+            currentRow += 2;
+          });
+
+          // Summary section
+          currentRow++;
+          sheet.getCell(currentRow, 1).value = 'SUMMARY';
+          sheet.getCell(currentRow, 1).font = { bold: true, size: 12 };
+          currentRow++;
+
+          const summaryData = [
+            ['Work Days', calData.workDays],
+            ['Legal Holidays', calendarData.numLegalHolidays],
+            ["Director's Holidays", calendarData.numDirectorHolidays],
+            ['NR Days', calData.nrDays],
+            ['Total Contract Days', calData.contractDays],
+          ];
+
+          summaryData.forEach(([label, value], idx) => {
+            sheet.getCell(currentRow, 1).value = label;
+            sheet.getCell(currentRow, 2).value = value;
+            sheet.getCell(currentRow, 2).alignment = { horizontal: 'right' };
+            if (idx === summaryData.length - 1) {
+              sheet.getCell(currentRow, 1).font = { bold: true };
+              sheet.getCell(currentRow, 2).font = { bold: true };
+            }
+            currentRow++;
+          });
+
+          // NR Day assignments
+          currentRow++;
+          sheet.getCell(currentRow, 1).value = 'NR Day Assignments:';
+          sheet.getCell(currentRow, 1).font = { bold: true };
+          currentRow++;
+
+          calData.nrDates.forEach(d => {
+            const cell = sheet.getCell(currentRow, 1);
+            cell.value = new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+            cell.font = { color: { argb: 'FF92400E' } };
+            currentRow++;
+          });
+        }
+
+        // Holidays sheet
+        const holidaySheet = workbook.addWorksheet('Holidays');
+        holidaySheet.getColumn(1).width = 15;
+        holidaySheet.getColumn(2).width = 30;
+
+        let row = 1;
+        holidaySheet.getCell(row, 1).value = 'LEGAL HOLIDAYS';
+        holidaySheet.getCell(row, 1).font = { bold: true, size: 12 };
+        row++;
+
+        Object.entries(calendarData.legalHolidays).sort().forEach(([date, name]) => {
+          holidaySheet.getCell(row, 1).value = date;
+          holidaySheet.getCell(row, 2).value = name;
+          holidaySheet.getCell(row, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };  // Light orange
+          holidaySheet.getCell(row, 2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+          row++;
+        });
+
+        row++;
+        holidaySheet.getCell(row, 1).value = "DIRECTOR'S HOLIDAYS";
+        holidaySheet.getCell(row, 1).font = { bold: true, size: 12 };
+        row++;
+
+        Object.entries(calendarData.directorHolidays).sort().forEach(([date, name]) => {
+          holidaySheet.getCell(row, 1).value = date;
+          holidaySheet.getCell(row, 2).value = name;
+          holidaySheet.getCell(row, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4C3' } };  // Light green
+          holidaySheet.getCell(row, 2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4C3' } };
+          row++;
+        });
+
+        // Change Requests sheet (if any)
+        if (changeRequests.length > 0) {
+          const requestSheet = workbook.addWorksheet('Change Requests');
+          requestSheet.getColumn(1).width = 12;
+          requestSheet.getColumn(2).width = 12;
+          requestSheet.getColumn(3).width = 15;
+          requestSheet.getColumn(4).width = 25;
+          requestSheet.getColumn(5).width = 30;
+
+          requestSheet.getCell(1, 1).value = 'Change Requests';
+          requestSheet.getCell(1, 1).font = { bold: true, size: 12 };
+
+          const headers = ['Calendar', 'Date', 'Current Status', 'Request', 'Comment'];
+          headers.forEach((h, i) => {
+            const cell = requestSheet.getCell(2, i + 1);
+            cell.value = h;
+            cell.font = { bold: true };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } };
+          });
+
+          changeRequests.forEach((r, idx) => {
+            requestSheet.getCell(3 + idx, 1).value = r.calendarType.toUpperCase();
+            requestSheet.getCell(3 + idx, 2).value = r.date;
+            requestSheet.getCell(3 + idx, 3).value = r.eventName || 'Work Day';
+            requestSheet.getCell(3 + idx, 4).value = r.action;
+            requestSheet.getCell(3 + idx, 5).value = r.comment || '';
+          });
+        }
+
+        // Download file
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `NIA_Calendar_${calendarData.fiscalYear}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      // Generate PDF download
+      const downloadPDF = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('portrait', 'mm', 'letter');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 15;
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+        const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+        const colors = {
+          legal: [247, 153, 53],      // NIA Orange
+          director: [177, 189, 55],   // NIA Green
+          nr: [250, 204, 21],
+          weekend: [229, 231, 235],
+          work: [255, 255, 255],
+          header: [50, 74, 77]
+        };
+
+        // Helper to get events for a month
+        const getMonthEvents = (year, month, calType) => {
+          const events = [];
+          const lastDay = new Date(year, month + 1, 0).getDate();
+          for (let d = 1; d <= lastDay; d++) {
+            const dateStr = formatDate(new Date(year, month, d));
+            if (calendarData.legalHolidays[dateStr]) {
+              events.push({ day: d, name: calendarData.legalHolidays[dateStr], type: 'legal' });
+            } else if (calendarData.directorHolidays[dateStr]) {
+              events.push({ day: d, name: calendarData.directorHolidays[dateStr], type: 'director' });
+            } else {
+              const nrDates = calType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates;
+              if (nrDates.includes(dateStr)) {
+                events.push({ day: d, name: 'NR Day', type: 'nr' });
+              }
+            }
+          }
+          return events;
+        };
+
+        ['aa', 'op'].forEach((calType, calIndex) => {
+          const title = calType === 'aa' ? '256-Day (Administrative)' : '250-Day (Office Professional)';
+          const calData = calType === 'aa' ? calendarData.calendars.aa : calendarData.calendars.op;
+
+          // Generate months for the fiscal year
+          const startYear = fiscalYear - 1;
+          const monthsList = [];
+          for (let m = 6; m < 12; m++) monthsList.push({ year: startYear, month: m });
+          for (let m = 0; m < 6; m++) monthsList.push({ year: fiscalYear, month: m });
+
+          // Layout: 3 columns, 2 rows per page = 6 months per page = 2 pages per calendar
+          const cols = 3;
+          const rowsPerPage = 2;
+          const monthsPerPage = cols * rowsPerPage;
+          const cellWidth = 8;
+          const cellHeight = 7;
+          const calendarWidth = cellWidth * 7;
+          const colSpacing = (pageWidth - 2 * margin - cols * calendarWidth) / (cols - 1);
+          const monthHeight = 75; // Height allocated per month including events
+
+          monthsList.forEach((monthData, idx) => {
+            // New page logic
+            if (idx % monthsPerPage === 0) {
+              if (calIndex > 0 || idx > 0) doc.addPage();
+
+              // Page header
+              doc.setFillColor(50, 74, 77);
+              doc.rect(0, 0, pageWidth, 18, 'F');
+              doc.setTextColor(255, 255, 255);
+              doc.setFontSize(14);
+              doc.setFont('helvetica', 'bold');
+              doc.text(`NIA ${calendarData.fiscalYear} - ${title}`, margin, 12);
+
+              const pageNum = Math.floor(idx / monthsPerPage) + 1;
+              doc.setFontSize(10);
+              doc.setFont('helvetica', 'normal');
+              doc.text(`Page ${pageNum} of 2`, pageWidth - margin, 12, { align: 'right' });
+            }
+
+            const posInPage = idx % monthsPerPage;
+            const col = posInPage % cols;
+            const row = Math.floor(posInPage / cols);
+            const x = margin + col * (calendarWidth + colSpacing);
+            const y = 25 + row * monthHeight;
+
+            const { year, month } = monthData;
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+
+            // Count work days in this month
+            let workDays = 0;
+            for (let d = 1; d <= lastDay.getDate(); d++) {
+              const dateStr = formatDate(new Date(year, month, d));
+              if (getDayTypeForExcel(dateStr, calType) === 'work') workDays++;
+            }
+
+            // Month title with work day count
+            doc.setTextColor(50, 74, 77);
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            doc.text(`${monthNames[month]} ${year}`, x, y);
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(100, 100, 100);
+            doc.text(`${workDays} work days`, x + calendarWidth, y, { align: 'right' });
+
+            // Day headers
+            const headerY = y + 3;
+            doc.setFillColor(...colors.header);
+            dayNames.forEach((day, i) => {
+              doc.rect(x + i * cellWidth, headerY, cellWidth, cellHeight, 'F');
+            });
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'bold');
+            dayNames.forEach((day, i) => {
+              doc.text(day, x + i * cellWidth + cellWidth/2, headerY + 5, { align: 'center' });
+            });
+
+            // Calendar days
+            let dayX = firstDay.getDay();
+            let dayY = 0;
+            const gridStartY = headerY + cellHeight;
+
+            // Draw empty cells before first day
+            for (let i = 0; i < dayX; i++) {
+              doc.setDrawColor(220, 220, 220);
+              doc.rect(x + i * cellWidth, gridStartY, cellWidth, cellHeight, 'S');
+            }
+
+            for (let d = 1; d <= lastDay.getDate(); d++) {
+              const dateStr = formatDate(new Date(year, month, d));
+              const dayType = getDayTypeForExcel(dateStr, calType);
+              const color = colors[dayType];
+
+              const cellX = x + dayX * cellWidth;
+              const cellY = gridStartY + dayY * cellHeight;
+
+              doc.setFillColor(...color);
+              doc.rect(cellX, cellY, cellWidth, cellHeight, 'F');
+              doc.setDrawColor(200, 200, 200);
+              doc.rect(cellX, cellY, cellWidth, cellHeight, 'S');
+
+              // Text color based on background
+              if (dayType === 'legal') {
+                doc.setTextColor(255, 255, 255);
+              } else if (dayType === 'weekend') {
+                doc.setTextColor(150, 150, 150);
+              } else {
+                doc.setTextColor(50, 50, 50);
+              }
+              doc.setFontSize(8);
+              doc.setFont('helvetica', dayType !== 'work' && dayType !== 'weekend' ? 'bold' : 'normal');
+              doc.text(d.toString(), cellX + cellWidth/2, cellY + 5, { align: 'center' });
+
+              dayX++;
+              if (dayX > 6) { dayX = 0; dayY++; }
+            }
+
+            // Fill remaining cells in last row
+            if (dayX > 0) {
+              for (let i = dayX; i < 7; i++) {
+                doc.setDrawColor(220, 220, 220);
+                doc.rect(x + i * cellWidth, gridStartY + dayY * cellHeight, cellWidth, cellHeight, 'S');
+              }
+            }
+
+            // Events list below calendar
+            const events = getMonthEvents(year, month, calType);
+            if (events.length > 0) {
+              const eventsY = gridStartY + (dayY + 1) * cellHeight + 2;
+              doc.setFontSize(7);
+              events.forEach((event, i) => {
+                const eventColor = event.type === 'legal' ? colors.legal :
+                                  event.type === 'director' ? [100, 120, 50] : // Darker green for text
+                                  [180, 130, 0]; // Darker yellow for text
+                doc.setTextColor(...eventColor);
+                doc.setFont('helvetica', 'normal');
+                const eventText = `${event.day}: ${event.name}`;
+                if (eventsY + i * 3.5 < y + monthHeight - 5) {
+                  doc.text(eventText, x, eventsY + i * 3.5);
+                }
+              });
+            }
+          });
+
+          // Summary page
+          doc.addPage();
+
+          // Header
+          doc.setFillColor(50, 74, 77);
+          doc.rect(0, 0, pageWidth, 18, 'F');
+          doc.setTextColor(255, 255, 255);
+          doc.setFontSize(14);
+          doc.setFont('helvetica', 'bold');
+          doc.text(`NIA ${calendarData.fiscalYear} - ${title} - Summary`, margin, 12);
+
+          // Summary box
+          const summaryY = 30;
+          doc.setFillColor(249, 250, 251);
+          doc.roundedRect(margin, summaryY, pageWidth - 2 * margin, 55, 3, 3, 'F');
+          doc.setDrawColor(200, 200, 200);
+          doc.roundedRect(margin, summaryY, pageWidth - 2 * margin, 55, 3, 3, 'S');
+
+          doc.setTextColor(50, 74, 77);
+          doc.setFontSize(14);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Calendar Summary', margin + 5, summaryY + 10);
+
+          doc.setFontSize(11);
+          doc.setFont('helvetica', 'normal');
+          const summaryItems = [
+            ['Work Days:', calData.workDays],
+            ['Legal Holidays:', calendarData.numLegalHolidays],
+            ["Director's Holidays:", calendarData.numDirectorHolidays],
+            ['NR Days:', calData.nrDays],
+            ['Total Contract Days:', calData.contractDays]
+          ];
+          summaryItems.forEach(([label, val], i) => {
+            const itemY = summaryY + 20 + i * 7;
+            doc.setTextColor(80, 80, 80);
+            doc.text(label, margin + 10, itemY);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(50, 74, 77);
+            doc.text(val.toString(), margin + 80, itemY);
+            doc.setFont('helvetica', 'normal');
+          });
+
+          // NR Day assignments
+          const nrY = summaryY + 65;
+          doc.setTextColor(50, 74, 77);
+          doc.setFontSize(12);
+          doc.setFont('helvetica', 'bold');
+          doc.text('NR Day Assignments', margin, nrY);
+
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          calData.nrDates.forEach((d, i) => {
+            const dateObj = new Date(d + 'T00:00:00');
+            const dateText = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+            doc.setFillColor(254, 243, 199);
+            doc.roundedRect(margin, nrY + 5 + i * 8, pageWidth - 2 * margin, 7, 1, 1, 'F');
+            doc.setTextColor(146, 64, 14);
+            doc.text(dateText, margin + 3, nrY + 10 + i * 8);
+          });
+
+          // Legend at bottom
+          const legendY = nrY + 5 + calData.nrDates.length * 8 + 15;
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(50, 74, 77);
+          doc.text('Legend', margin, legendY);
+
+          const legendItems = [
+            { label: 'Legal Holiday', color: colors.legal },
+            { label: "Director's Holiday", color: colors.director },
+            { label: 'NR Day', color: colors.nr },
+            { label: 'Weekend', color: colors.weekend },
+          ];
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'normal');
+          legendItems.forEach((item, i) => {
+            const lx = margin + (i % 2) * 90;
+            const ly = legendY + 8 + Math.floor(i / 2) * 10;
+            doc.setFillColor(...item.color);
+            doc.rect(lx, ly - 4, 8, 6, 'F');
+            doc.setDrawColor(180, 180, 180);
+            doc.rect(lx, ly - 4, 8, 6, 'S');
+            doc.setTextColor(60, 60, 60);
+            doc.text(item.label, lx + 11, ly);
+          });
+        });
+
+        doc.save(`NIA_Calendar_${calendarData.fiscalYear}.pdf`);
+      };
+
+      // Generate HTML download
+      const downloadHTML = () => {
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+        const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+        // Helper to get events for a month
+        const getMonthEventsHTML = (year, month, calType) => {
+          const events = [];
+          const lastDay = new Date(year, month + 1, 0).getDate();
+          for (let d = 1; d <= lastDay; d++) {
+            const dateStr = formatDate(new Date(year, month, d));
+            if (calendarData.legalHolidays[dateStr]) {
+              events.push({ day: d, name: calendarData.legalHolidays[dateStr], color: '#F79935' });
+            } else if (calendarData.directorHolidays[dateStr]) {
+              events.push({ day: d, name: calendarData.directorHolidays[dateStr], color: '#6B8E23' });
+            } else {
+              const nrDates = calType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates;
+              if (nrDates.includes(dateStr)) {
+                events.push({ day: d, name: 'NR Day', color: '#B45309' });
+              }
+            }
+          }
+          return events.map(e => `<div style="color:${e.color};font-size:11px;margin-top:2px;">${e.day}: ${e.name}</div>`).join('');
+        };
+
+        const generateCalendarHTML = (calType) => {
+          const title = calType === 'aa' ? '256-Day (Administrative)' : '250-Day (Office Professional)';
+          const calData = calType === 'aa' ? calendarData.calendars.aa : calendarData.calendars.op;
+          const startYear = fiscalYear - 1;
+          const monthsList = [];
+          for (let m = 6; m < 12; m++) monthsList.push({ year: startYear, month: m });
+          for (let m = 0; m < 6; m++) monthsList.push({ year: fiscalYear, month: m });
+
+          let monthsHTML = monthsList.map(({ year, month }) => {
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            let cells = [];
+
+            // Count work days
+            let workDays = 0;
+            for (let d = 1; d <= lastDay.getDate(); d++) {
+              const dateStr = formatDate(new Date(year, month, d));
+              if (getDayTypeForExcel(dateStr, calType) === 'work') workDays++;
+            }
+
+            // Empty cells before first day
+            for (let i = 0; i < firstDay.getDay(); i++) {
+              cells.push('<td style="border:1px solid #ddd;"></td>');
+            }
+
+            for (let d = 1; d <= lastDay.getDate(); d++) {
+              const dateStr = formatDate(new Date(year, month, d));
+              const dayType = getDayTypeForExcel(dateStr, calType);
+              const bgColor = dayType === 'legal' ? '#F79935' :
+                             dayType === 'director' ? '#B1BD37' :
+                             dayType === 'nr' ? '#FACC15' :
+                             dayType === 'weekend' ? '#E5E7EB' : '#FFFFFF';
+              const textColor = dayType === 'legal' ? '#FFFFFF' : (dayType === 'director' ? '#324A4D' : '#1F2937');
+              cells.push(`<td style="background:${bgColor};color:${textColor};text-align:center;padding:6px 4px;border:1px solid #ddd;font-weight:${dayType !== 'work' && dayType !== 'weekend' ? 'bold' : 'normal'}">${d}</td>`);
+            }
+
+            // Fill remaining cells
+            while (cells.length % 7 !== 0) {
+              cells.push('<td style="border:1px solid #ddd;"></td>');
+            }
+
+            // Build weeks
+            let weeks = [];
+            while (cells.length > 0) {
+              weeks.push('<tr>' + cells.splice(0, 7).join('') + '</tr>');
+            }
+
+            // Get events for this month
+            const eventsHTML = getMonthEventsHTML(year, month, calType);
+
+            return `
+              <div style="break-inside:avoid;margin-bottom:20px;background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                  <h3 style="color:#324A4D;margin:0;font-size:14px;">${monthNames[month]} ${year}</h3>
+                  <span style="color:#6B7280;font-size:11px;">${workDays} work days</span>
+                </div>
+                <table style="border-collapse:collapse;width:100%;">
+                  <tr style="background:#324A4D;color:white;">
+                    ${dayNames.map(d => `<th style="padding:6px 2px;width:14.28%;font-size:11px;">${d}</th>`).join('')}
+                  </tr>
+                  ${weeks.join('')}
+                </table>
+                ${eventsHTML ? `<div style="margin-top:8px;border-top:1px solid #eee;padding-top:6px;">${eventsHTML}</div>` : ''}
+              </div>
+            `;
+          }).join('');
+
+          // Generate NR Day assignments list
+          const nrAssignmentsHTML = calData.nrDates.map(d => {
+            const dateObj = new Date(d + 'T00:00:00');
+            return `<div style="background:#FEF3C7;color:#92400E;padding:6px 10px;border-radius:4px;margin-bottom:4px;font-size:12px;">
+              ${dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            </div>`;
+          }).join('');
+
+          return `
+            <div style="page-break-after:always;padding:20px;background:#F3F4F6;min-height:100vh;">
+              <div style="background:linear-gradient(to right,#55787C,#324A4D);color:white;padding:20px;border-radius:8px;margin-bottom:20px;">
+                <h1 style="margin:0;font-size:22px;">NIA ${calendarData.fiscalYear} - ${title}</h1>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
+                ${monthsHTML}
+              </div>
+              <div style="margin-top:20px;padding:20px;background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                <h3 style="margin:0 0 15px 0;color:#324A4D;font-size:16px;">Summary</h3>
+                <div style="max-width:280px;font-size:13px;">
+                  <div style="display:flex;justify-content:space-between;padding:4px 0;"><span style="color:#6B7280;">Work Days:</span> <strong>${calData.workDays}</strong></div>
+                  <div style="display:flex;justify-content:space-between;padding:4px 0;"><span style="color:#6B7280;">Legal Holidays:</span> <strong>${calendarData.numLegalHolidays}</strong></div>
+                  <div style="display:flex;justify-content:space-between;padding:4px 0;"><span style="color:#6B7280;">Director's Holidays:</span> <strong>${calendarData.numDirectorHolidays}</strong></div>
+                  <div style="display:flex;justify-content:space-between;padding:4px 0;"><span style="color:#6B7280;">NR Days:</span> <strong>${calData.nrDays}</strong></div>
+                  <div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:6px;border-top:1px solid #eee;">
+                    <span style="color:#324A4D;font-weight:bold;">Total Contract Days:</span>
+                    <strong style="color:#324A4D;">${calData.contractDays}</strong>
+                  </div>
+                </div>
+              </div>
+              <div style="margin-top:20px;padding:20px;background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                <h3 style="margin:0 0 15px 0;color:#324A4D;font-size:16px;">NR Day Assignments</h3>
+                ${nrAssignmentsHTML}
+              </div>
+            </div>
+          `;
+        };
+
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>NIA Calendar ${calendarData.fiscalYear}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background: #F3F4F6; }
+    @media print {
+      body { print-color-adjust: exact; -webkit-print-color-adjust: exact; background: white; }
+      div[style*="page-break-after"] { page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+  ${generateCalendarHTML('aa')}
+  ${generateCalendarHTML('op')}
+  <div style="padding:20px;background:#F3F4F6;">
+    <div style="background:white;padding:20px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+      <h2 style="color:#324A4D;margin:0 0 15px 0;font-size:18px;">Legend</h2>
+      <div style="display:flex;gap:30px;flex-wrap:wrap;">
+        <span style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:20px;height:20px;background:#F79935;border-radius:4px;"></span> Legal Holiday</span>
+        <span style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:20px;height:20px;background:#B1BD37;border-radius:4px;"></span> Director's Holiday</span>
+        <span style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:20px;height:20px;background:#FACC15;border-radius:4px;"></span> NR Day</span>
+        <span style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:20px;height:20px;background:#E5E7EB;border-radius:4px;"></span> Weekend</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `NIA_Calendar_${calendarData.fiscalYear}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      // Generate months for the fiscal year
+      const startYear = fiscalYear - 1;
+      const months = [];
+      for (let m = 6; m < 12; m++) months.push({ year: startYear, month: m });
+      for (let m = 0; m < 6; m++) months.push({ year: fiscalYear, month: m });
+
+      return (
+        <div className="min-h-screen bg-gray-100 p-4">
+          <div className="max-w-7xl mx-auto">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-nia-grey-blue to-nia-dark text-white rounded-lg shadow-lg p-6 mb-6">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="w-8 h-8"><CalendarIcon /></span>
+                <h1 className="text-2xl font-bold">NIA Annual Calendar Review Tool</h1>
+              </div>
+              <p className="text-gray-200">Review and request changes to the annual work calendar before finalization</p>
+            </div>
+
+            {/* Configuration Panel */}
+            <div className="bg-white rounded-lg shadow p-4 mb-6">
+              <h2 className="font-semibold text-gray-800 mb-4">Calendar Configuration</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fiscal Year</label>
+                  <select
+                    value={fiscalYear}
+                    onChange={(e) => handleFiscalYearChange(parseInt(e.target.value))}
+                    className="w-full border rounded-lg px-3 py-2"
+                  >
+                    {[...Array(10)].map((_, i) => {
+                      const fy = currentYear + i;
+                      return <option key={fy} value={fy}>FY{fy} (Jul {fy-1} - Jun {fy})</option>;
+                    })}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Election Day Status</label>
+                  <select
+                    value={electionDayLegal ? 'yes' : 'no'}
+                    onChange={(e) => setElectionDayLegal(e.target.value === 'yes')}
+                    className="w-full border rounded-lg px-3 py-2"
+                  >
+                    <option value="yes">Legal Holiday (11 total)</option>
+                    <option value="no">Not a Legal Holiday (10 + extra Dir. Holiday)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Spring Break Start (OP)</label>
+                  <input
+                    type="date"
+                    value={springBreakStart}
+                    onChange={(e) => setSpringBreakStart(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Legend */}
+            <div className="bg-white rounded-lg shadow p-4 mb-6">
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 bg-nia-orange rounded"></span>
+                  <span>Legal Holiday (fixed)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 bg-nia-green rounded"></span>
+                  <span>Director's Holiday (click to trade)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 bg-yellow-400 rounded"></span>
+                  <span>NR Day (click to move)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 bg-gray-200 rounded"></span>
+                  <span>Weekend</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 bg-white border rounded"></span>
+                  <span>Work Day (click to request NR)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Calendar Type Tabs */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setActiveTab('aa')}
+                className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
+                  activeTab === 'aa'
+                    ? 'bg-nia-dark text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <span className="w-4 h-4"><BriefcaseIcon /></span>
+                256-Day (Administrative)
+              </button>
+              <button
+                onClick={() => setActiveTab('op')}
+                className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
+                  activeTab === 'op'
+                    ? 'bg-nia-dark text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <span className="w-4 h-4"><ClockIcon /></span>
+                250-Day (Office Professional)
+              </button>
+            </div>
+
+            {/* Main Content */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              {/* Calendar Grid */}
+              <div className="lg:col-span-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {months.map(({ year, month }) => (
+                    <MonthCalendar
+                      key={`${year}-${month}`}
+                      year={year}
+                      month={month}
+                      calendarData={calendarData}
+                      calendarType={activeTab}
+                      changeRequests={changeRequests}
+                      onRequestChange={handleRequestChange}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Sidebar */}
+              <div className="space-y-4">
+                <SummaryTable calendarData={calendarData} type={activeTab} changeRequests={changeRequests} />
+
+                <ChangeRequestPanel
+                  requests={changeRequests.filter(r => r.calendarType === activeTab)}
+                  onRemove={removeRequest}
+                />
+
+                {/* Export Buttons */}
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-gray-700">Download Calendar:</p>
+                  <button
+                    onClick={downloadPDF}
+                    className="w-full bg-nia-dark text-white rounded-lg py-3 px-4 font-medium hover:opacity-90 transition flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                      <line x1="16" y1="13" x2="8" y2="13"/>
+                      <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    Download as PDF (Recommended)
+                  </button>
+                  <button
+                    onClick={downloadHTML}
+                    className="w-full bg-nia-grey-blue text-white rounded-lg py-2.5 px-4 font-medium hover:opacity-90 transition flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="16 18 22 12 16 6"/>
+                      <polyline points="8 6 2 12 8 18"/>
+                    </svg>
+                    Download as HTML
+                  </button>
+                  <button
+                    onClick={downloadExcel}
+                    className="w-full bg-nia-green text-nia-dark rounded-lg py-2.5 px-4 font-medium hover:opacity-90 transition flex items-center justify-center gap-2"
+                  >
+                    <span className="w-5 h-5"><FileSpreadsheetIcon /></span>
+                    Download as Excel (.xlsx)
+                  </button>
+                </div>
+
+                <p className="text-xs text-gray-500 text-center">
+                  PDF is best for sharing. HTML can be printed. Excel includes data for editing.
+                </p>
+              </div>
+            </div>
+
+            {/* Change Request Modal */}
+            {showRequestModal && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
+                  <h3 className="text-lg font-semibold mb-4">Request Calendar Change</h3>
+                  <div className="text-sm text-gray-600 mb-4 p-3 bg-gray-50 rounded-lg">
+                    <div className="flex justify-between mb-1">
+                      <span>Date:</span>
+                      <strong>{showRequestModal.date}</strong>
+                    </div>
+                    <div className="flex justify-between mb-1">
+                      <span>Calendar:</span>
+                      <strong>{showRequestModal.calendarType.toUpperCase()}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Current Status:</span>
+                      <strong className={
+                        showRequestModal.dayType === 'nr' ? 'text-yellow-600' :
+                        showRequestModal.dayType === 'director' ? 'text-nia-green' :
+                        'text-gray-800'
+                      }>
+                        {showRequestModal.eventName || 'Work Day'}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Make this date a:</label>
+                    <div className="space-y-2">
+                      <label className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition ${requestAction === 'work' ? 'border-nia-dark bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <input
+                          type="radio"
+                          name="dayType"
+                          value="work"
+                          checked={requestAction === 'work'}
+                          onChange={(e) => setRequestAction(e.target.value)}
+                          className="w-4 h-4"
+                        />
+                        <span className="w-4 h-4 bg-white border-2 border-gray-300 rounded"></span>
+                        <span className="font-medium">Work Day</span>
+                      </label>
+                      <label className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition ${requestAction === 'nr' ? 'border-nia-dark bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <input
+                          type="radio"
+                          name="dayType"
+                          value="nr"
+                          checked={requestAction === 'nr'}
+                          onChange={(e) => setRequestAction(e.target.value)}
+                          className="w-4 h-4"
+                        />
+                        <span className="w-4 h-4 bg-yellow-400 rounded"></span>
+                        <span className="font-medium">NR Day</span>
+                      </label>
+                      <label className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition ${requestAction === 'director' ? 'border-nia-dark bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <input
+                          type="radio"
+                          name="dayType"
+                          value="director"
+                          checked={requestAction === 'director'}
+                          onChange={(e) => setRequestAction(e.target.value)}
+                          className="w-4 h-4"
+                        />
+                        <span className="w-4 h-4 bg-nia-green rounded"></span>
+                        <span className="font-medium">Director's Holiday</span>
+                      </label>
+                      <label className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition ${requestAction === 'other' ? 'border-nia-dark bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <input
+                          type="radio"
+                          name="dayType"
+                          value="other"
+                          checked={requestAction === 'other'}
+                          onChange={(e) => setRequestAction(e.target.value)}
+                          className="w-4 h-4"
+                        />
+                        <span className="w-4 h-4 bg-gray-400 rounded"></span>
+                        <span className="font-medium">Other (explain below)</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Notes (optional)
+                    </label>
+                    <textarea
+                      value={requestComment}
+                      onChange={(e) => setRequestComment(e.target.value)}
+                      placeholder="Add any reasoning or additional details..."
+                      className="w-full border rounded-lg px-3 py-2 h-20"
+                    />
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowRequestModal(null)}
+                      className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2 hover:bg-gray-200"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={submitChangeRequest}
+                      className="flex-1 bg-nia-dark text-white rounded-lg py-2 hover:opacity-90"
+                    >
+                      Submit Request
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<NIACalendarReviewTool />, document.getElementById('root'));
+  </script>
+</body>
+</html>
