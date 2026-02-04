@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import Image from 'next/image';
 import ExcelJS from 'exceljs';
 import { jsPDF } from 'jspdf';
 
@@ -1393,8 +1394,14 @@ ${generateCalendarHTML('op')}
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="bg-gradient-to-r from-[#55787c] to-[#324a4d] text-white rounded-lg shadow-lg p-6 mb-6">
-          <div className="flex items-center gap-3 mb-2">
-            <span className="w-8 h-8"><CalendarIcon /></span>
+          <div className="flex items-center gap-4 mb-2">
+            <Image
+              src="/logo.png"
+              alt="NIA Logo"
+              width={48}
+              height={48}
+              className="rounded"
+            />
             <h1 className="text-2xl font-bold">NIA Annual Calendar Review Tool</h1>
           </div>
           <p className="text-gray-200">Review and request changes to the annual work calendar before finalization</p>
