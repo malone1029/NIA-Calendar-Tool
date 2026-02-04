@@ -688,8 +688,8 @@ export default function NIACalendarReviewTool() {
     header: { bg: 'FF324A4D', font: 'FFFFFFFF' },     // NIA Dark
   };
 
-  // Helper to get day type for Excel
-  const getDayTypeForExcel = (dateStr: string, calType: 'aa' | 'op'): string => {
+  // Helper to get original day type (before change requests)
+  const getOriginalDayType = (dateStr: string, calType: 'aa' | 'op'): string => {
     const d = new Date(dateStr + 'T00:00:00');
     if (d.getDay() === 0 || d.getDay() === 6) return 'weekend';
     if (calendarData.legalHolidays[dateStr]) return 'legal';
@@ -697,6 +697,23 @@ export default function NIACalendarReviewTool() {
     const nrDates = calType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates;
     if (nrDates.includes(dateStr)) return 'nr';
     return 'work';
+  };
+
+  // Helper to get day type for exports (applies change requests)
+  const getDayTypeForExport = (dateStr: string, calType: 'aa' | 'op'): string => {
+    const originalType = getOriginalDayType(dateStr, calType);
+
+    // Check if there's a change request for this date
+    const changeReq = changeRequests.find(r => r.date === dateStr && r.calendarType === calType);
+
+    if (changeReq) {
+      // Parse the requested type from the action
+      if (changeReq.action.includes('Work Day')) return 'work';
+      if (changeReq.action.includes('NR Day')) return 'nr';
+      if (changeReq.action.includes("Director's Holiday")) return 'director';
+    }
+
+    return originalType;
   };
 
   const downloadExcel = async () => {
@@ -773,7 +790,7 @@ export default function NIACalendarReviewTool() {
 
         for (let d = 1; d <= lastDay.getDate(); d++) {
           const dateStr = formatDate(new Date(year, month, d));
-          const dayType = getDayTypeForExcel(dateStr, calType);
+          const dayType = getDayTypeForExport(dateStr, calType);
           const colors = EXCEL_COLORS[dayType as keyof typeof EXCEL_COLORS];
 
           const cell = sheet.getCell(currentRow, col);
@@ -1030,7 +1047,7 @@ export default function NIACalendarReviewTool() {
         let workDays = 0;
         for (let d = 1; d <= lastDay.getDate(); d++) {
           const dateStr = formatDate(new Date(year, month, d));
-          if (getDayTypeForExcel(dateStr, calType) === 'work') workDays++;
+          if (getDayTypeForExport(dateStr, calType) === 'work') workDays++;
         }
 
         // Month title with work day count
@@ -1069,7 +1086,7 @@ export default function NIACalendarReviewTool() {
 
         for (let d = 1; d <= lastDay.getDate(); d++) {
           const dateStr = formatDate(new Date(year, month, d));
-          const dayType = getDayTypeForExcel(dateStr, calType);
+          const dayType = getDayTypeForExport(dateStr, calType);
           const color = colors[dayType as keyof typeof colors];
 
           const cellX = x + dayX * cellWidth;
@@ -1256,7 +1273,7 @@ export default function NIACalendarReviewTool() {
         let workDays = 0;
         for (let d = 1; d <= lastDay.getDate(); d++) {
           const dateStr = formatDate(new Date(year, month, d));
-          if (getDayTypeForExcel(dateStr, calType) === 'work') workDays++;
+          if (getDayTypeForExport(dateStr, calType) === 'work') workDays++;
         }
 
         // Empty cells before first day
@@ -1266,7 +1283,7 @@ export default function NIACalendarReviewTool() {
 
         for (let d = 1; d <= lastDay.getDate(); d++) {
           const dateStr = formatDate(new Date(year, month, d));
-          const dayType = getDayTypeForExcel(dateStr, calType);
+          const dayType = getDayTypeForExport(dateStr, calType);
           const bgColor = dayType === 'legal' ? '#F79935' :
                          dayType === 'director' ? '#B1BD37' :
                          dayType === 'nr' ? '#FACC15' :
