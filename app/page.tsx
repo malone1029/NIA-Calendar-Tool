@@ -1012,7 +1012,7 @@ export default function NIACalendarReviewTool() {
       const cellHeight = 6;
       const calendarWidth = cellWidth * 7;
       const colSpacing = (pageWidth - 2 * margin - cols * calendarWidth) / (cols - 1);
-      const monthHeight = 52; // Height allocated per month (compact layout)
+      const monthHeight = 60; // Height allocated per month (compact layout with event lists)
 
       monthsList.forEach((monthData, idx) => {
         // New page logic
