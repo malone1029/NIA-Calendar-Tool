@@ -1012,31 +1012,31 @@ export default function NIACalendarReviewTool() {
       const cellHeight = 6;
       const calendarWidth = cellWidth * 7;
       const colSpacing = (pageWidth - 2 * margin - cols * calendarWidth) / (cols - 1);
-      const monthHeight = 60; // Height allocated per month (compact layout with event lists)
+      const monthHeight = 64; // Height allocated per month (compact layout with event lists)
 
       monthsList.forEach((monthData, idx) => {
         // New page logic
         if (idx % monthsPerPage === 0) {
           if (calIndex > 0 || idx > 0) doc.addPage();
 
-          // Page header
+          // Page header (compact)
           doc.setFillColor(50, 74, 77);
-          doc.rect(0, 0, pageWidth, 18, 'F');
+          doc.rect(0, 0, pageWidth, 14, 'F');
           doc.setTextColor(255, 255, 255);
-          doc.setFontSize(14);
+          doc.setFontSize(12);
           doc.setFont('helvetica', 'bold');
-          doc.text(`NIA ${calendarData.fiscalYear} - ${title}`, margin, 12);
+          doc.text(`NIA ${calendarData.fiscalYear} - ${title}`, margin, 10);
 
-          doc.setFontSize(10);
+          doc.setFontSize(9);
           doc.setFont('helvetica', 'normal');
-          doc.text('Full Year View', pageWidth - margin, 12, { align: 'right' });
+          doc.text('Full Year View', pageWidth - margin, 10, { align: 'right' });
         }
 
         const posInPage = idx % monthsPerPage;
         const col = posInPage % cols;
         const row = Math.floor(posInPage / cols);
         const x = margin + col * (calendarWidth + colSpacing);
-        const y = 25 + row * monthHeight;
+        const y = 19 + row * monthHeight;
 
         const { year, month } = monthData;
         const firstDay = new Date(year, month, 1);
@@ -1132,8 +1132,8 @@ export default function NIACalendarReviewTool() {
             doc.setTextColor(...eventColor);
             doc.setFont('helvetica', 'normal');
             const eventText = `${event.day}: ${event.name}`;
-            if (eventsY + i * 3.5 < y + monthHeight - 5) {
-              doc.text(eventText, x, eventsY + i * 3.5);
+            if (eventsY + i * 2.5 < y + monthHeight - 3) {
+              doc.text(eventText, x, eventsY + i * 2.5);
             }
           });
         }
