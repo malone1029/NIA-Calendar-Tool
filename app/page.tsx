@@ -1004,15 +1004,15 @@ export default function NIACalendarReviewTool() {
       for (let m = 6; m < 12; m++) monthsList.push({ year: startYear, month: m });
       for (let m = 0; m < 6; m++) monthsList.push({ year: fiscalYear, month: m });
 
-      // Layout: 3 columns, 2 rows per page = 6 months per page = 2 pages per calendar
+      // Layout: 3 columns, 4 rows per page = 12 months per page = 1 page per calendar
       const cols = 3;
-      const rowsPerPage = 2;
+      const rowsPerPage = 4;
       const monthsPerPage = cols * rowsPerPage;
-      const cellWidth = 8;
-      const cellHeight = 7;
+      const cellWidth = 7;
+      const cellHeight = 6;
       const calendarWidth = cellWidth * 7;
       const colSpacing = (pageWidth - 2 * margin - cols * calendarWidth) / (cols - 1);
-      const monthHeight = 75; // Height allocated per month including events
+      const monthHeight = 52; // Height allocated per month (compact layout)
 
       monthsList.forEach((monthData, idx) => {
         // New page logic
@@ -1027,10 +1027,9 @@ export default function NIACalendarReviewTool() {
           doc.setFont('helvetica', 'bold');
           doc.text(`NIA ${calendarData.fiscalYear} - ${title}`, margin, 12);
 
-          const pageNum = Math.floor(idx / monthsPerPage) + 1;
           doc.setFontSize(10);
           doc.setFont('helvetica', 'normal');
-          doc.text(`Page ${pageNum} of 2`, pageWidth - margin, 12, { align: 'right' });
+          doc.text('Full Year View', pageWidth - margin, 12, { align: 'right' });
         }
 
         const posInPage = idx % monthsPerPage;
