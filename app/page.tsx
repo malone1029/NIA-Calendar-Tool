@@ -1008,11 +1008,11 @@ export default function NIACalendarReviewTool() {
       const cols = 3;
       const rowsPerPage = 4;
       const monthsPerPage = cols * rowsPerPage;
-      const cellWidth = 7;
-      const cellHeight = 6;
+      const cellWidth = 8;
+      const cellHeight = 6.5;
       const calendarWidth = cellWidth * 7;
       const colSpacing = (pageWidth - 2 * margin - cols * calendarWidth) / (cols - 1);
-      const monthHeight = 64; // Height allocated per month (compact layout with event lists)
+      const monthHeight = 56; // Height allocated per month (no event lists)
 
       monthsList.forEach((monthData, idx) => {
         // New page logic
@@ -1036,7 +1036,7 @@ export default function NIACalendarReviewTool() {
         const col = posInPage % cols;
         const row = Math.floor(posInPage / cols);
         const x = margin + col * (calendarWidth + colSpacing);
-        const y = 19 + row * monthHeight;
+        const y = 24 + row * monthHeight;
 
         const { year, month } = monthData;
         const firstDay = new Date(year, month, 1);
@@ -1123,7 +1123,7 @@ export default function NIACalendarReviewTool() {
       });
 
       // Legend at bottom of calendar page
-      const legendY = 19 + 4 * monthHeight + 5;
+      const legendY = 24 + 4 * monthHeight + 4;
       const legendItems = [
         { label: 'Legal Holiday', color: colors.legal },
         { label: "Director's Holiday", color: colors.director },
