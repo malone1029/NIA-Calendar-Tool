@@ -958,8 +958,9 @@ export default function NIACalendarReviewTool() {
 
   // Generate PDF download
   const downloadPDF = () => {
-    const doc = new jsPDF('portrait', 'mm', 'letter');
+    const doc = new jsPDF('landscape', 'mm', 'letter');
     const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 15;
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                        'July', 'August', 'September', 'October', 'November', 'December'];
@@ -1004,15 +1005,17 @@ export default function NIACalendarReviewTool() {
       for (let m = 6; m < 12; m++) monthsList.push({ year: startYear, month: m });
       for (let m = 0; m < 6; m++) monthsList.push({ year: fiscalYear, month: m });
 
-      // Layout: 3 columns, 4 rows per page = 12 months per page = 1 page per calendar
-      const cols = 3;
-      const rowsPerPage = 4;
+      // Layout: 6 columns, 2 rows per page = 12 months per page = 1 page per calendar (landscape)
+      const cols = 6;
+      const rowsPerPage = 2;
       const monthsPerPage = cols * rowsPerPage;
-      const cellWidth = 8;
-      const cellHeight = 6.5;
+      const cellWidth = 5;
+      const cellHeight = 5;
       const calendarWidth = cellWidth * 7;
-      const colSpacing = (pageWidth - 2 * margin - cols * calendarWidth) / (cols - 1);
-      const monthHeight = 56; // Height allocated per month (no event lists)
+      const eventsWidth = 28; // Space for events list to the right
+      const blockWidth = calendarWidth + eventsWidth;
+      const colSpacing = (pageWidth - 2 * margin - cols * blockWidth) / (cols - 1);
+      const monthHeight = 95; // Height for each row (landscape gives more vertical space)
 
       monthsList.forEach((monthData, idx) => {
         // New page logic
@@ -1035,8 +1038,8 @@ export default function NIACalendarReviewTool() {
         const posInPage = idx % monthsPerPage;
         const col = posInPage % cols;
         const row = Math.floor(posInPage / cols);
-        const x = margin + col * (calendarWidth + colSpacing);
-        const y = 24 + row * monthHeight;
+        const x = margin + col * (blockWidth + colSpacing);
+        const y = 22 + row * monthHeight;
 
         const { year, month } = monthData;
         const firstDay = new Date(year, month, 1);
@@ -1051,25 +1054,25 @@ export default function NIACalendarReviewTool() {
 
         // Month title with work day count
         doc.setTextColor(50, 74, 77);
-        doc.setFontSize(11);
+        doc.setFontSize(9);
         doc.setFont('helvetica', 'bold');
         doc.text(`${monthNames[month]} ${year}`, x, y);
-        doc.setFontSize(8);
+        doc.setFontSize(6);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 100, 100);
-        doc.text(`${workDays} work days`, x + calendarWidth, y, { align: 'right' });
+        doc.text(`${workDays} days`, x + calendarWidth, y, { align: 'right' });
 
         // Day headers
-        const headerY = y + 3;
+        const headerY = y + 2;
         doc.setFillColor(...colors.header);
         dayNames.forEach((_, i) => {
           doc.rect(x + i * cellWidth, headerY, cellWidth, cellHeight, 'F');
         });
         doc.setTextColor(255, 255, 255);
-        doc.setFontSize(7);
+        doc.setFontSize(5);
         doc.setFont('helvetica', 'bold');
         dayNames.forEach((day, i) => {
-          doc.text(day, x + i * cellWidth + cellWidth/2, headerY + 5, { align: 'center' });
+          doc.text(day, x + i * cellWidth + cellWidth/2, headerY + 3.5, { align: 'center' });
         });
 
         // Calendar days
@@ -1104,9 +1107,9 @@ export default function NIACalendarReviewTool() {
           } else {
             doc.setTextColor(50, 50, 50);
           }
-          doc.setFontSize(8);
+          doc.setFontSize(6);
           doc.setFont('helvetica', dayType !== 'work' && dayType !== 'weekend' ? 'bold' : 'normal');
-          doc.text(d.toString(), cellX + cellWidth/2, cellY + 5, { align: 'center' });
+          doc.text(d.toString(), cellX + cellWidth/2, cellY + 3.5, { align: 'center' });
 
           dayX++;
           if (dayX > 6) { dayX = 0; dayY++; }
@@ -1120,20 +1123,39 @@ export default function NIACalendarReviewTool() {
           }
         }
 
+        // Events list to the right of calendar
+        const events = getMonthEvents(year, month, calType);
+        if (events.length > 0) {
+          const eventsX = x + calendarWidth + 2;
+          doc.setFontSize(5.5);
+          events.forEach((event, i) => {
+            const eventColor = event.type === 'legal' ? colors.legal :
+                              event.type === 'director' ? [100, 142, 35] as [number, number, number] :
+                              [180, 130, 0] as [number, number, number];
+            doc.setTextColor(...eventColor);
+            doc.setFont('helvetica', 'normal');
+            // Truncate long event names
+            let eventName = event.name;
+            if (eventName.length > 18) eventName = eventName.substring(0, 16) + '..';
+            doc.text(`${event.day}: ${eventName}`, eventsX, headerY + 2 + i * 4);
+          });
+        }
+
       });
 
       // Legend at bottom of calendar page
-      const legendY = 24 + 4 * monthHeight + 4;
+      const legendY = pageHeight - 12;
       const legendItems = [
         { label: 'Legal Holiday', color: colors.legal },
         { label: "Director's Holiday", color: colors.director },
         { label: 'NR Day', color: colors.nr },
         { label: 'Weekend', color: colors.weekend },
       ];
-      doc.setFontSize(8);
+      doc.setFontSize(7);
       doc.setFont('helvetica', 'normal');
+      const legendStartX = (pageWidth - 4 * 50) / 2; // Center the legend
       legendItems.forEach((item, i) => {
-        const lx = margin + i * 45;
+        const lx = legendStartX + i * 50;
         doc.setFillColor(...item.color);
         doc.rect(lx, legendY, 6, 4, 'F');
         doc.setDrawColor(180, 180, 180);
