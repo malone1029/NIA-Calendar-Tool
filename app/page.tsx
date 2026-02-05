@@ -1120,23 +1120,26 @@ export default function NIACalendarReviewTool() {
           }
         }
 
-        // Events list below calendar
-        const events = getMonthEvents(year, month, calType);
-        if (events.length > 0) {
-          const eventsY = gridStartY + (dayY + 1) * cellHeight + 2;
-          doc.setFontSize(7);
-          events.forEach((event, i) => {
-            const eventColor = event.type === 'legal' ? colors.legal :
-                              event.type === 'director' ? [100, 120, 50] as [number, number, number] :
-                              [180, 130, 0] as [number, number, number];
-            doc.setTextColor(...eventColor);
-            doc.setFont('helvetica', 'normal');
-            const eventText = `${event.day}: ${event.name}`;
-            if (eventsY + i * 2.5 < y + monthHeight - 3) {
-              doc.text(eventText, x, eventsY + i * 2.5);
-            }
-          });
-        }
+      });
+
+      // Legend at bottom of calendar page
+      const legendY = 19 + 4 * monthHeight + 5;
+      const legendItems = [
+        { label: 'Legal Holiday', color: colors.legal },
+        { label: "Director's Holiday", color: colors.director },
+        { label: 'NR Day', color: colors.nr },
+        { label: 'Weekend', color: colors.weekend },
+      ];
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      legendItems.forEach((item, i) => {
+        const lx = margin + i * 45;
+        doc.setFillColor(...item.color);
+        doc.rect(lx, legendY, 6, 4, 'F');
+        doc.setDrawColor(180, 180, 180);
+        doc.rect(lx, legendY, 6, 4, 'S');
+        doc.setTextColor(60, 60, 60);
+        doc.text(item.label, lx + 8, legendY + 3);
       });
 
       // Summary page
@@ -1150,19 +1153,68 @@ export default function NIACalendarReviewTool() {
       doc.setFont('helvetica', 'bold');
       doc.text(`NIA ${calendarData.fiscalYear} - ${title} - Summary`, margin, 12);
 
-      // Summary box
-      const summaryY = 30;
+      // Special days listed by month
+      let currentY = 28;
+      const colWidth = (pageWidth - 2 * margin) / 2;
+      let col = 0;
+      let colStartY = currentY;
+
+      monthsList.forEach(({ year, month }) => {
+        const events = getMonthEvents(year, month, calType);
+        if (events.length === 0) return;
+
+        // Check if we need to move to second column or new concept
+        const neededHeight = 8 + events.length * 5;
+        if (col === 0 && currentY + neededHeight > 220) {
+          // Move to second column
+          col = 1;
+          currentY = colStartY;
+        } else if (col === 1 && currentY + neededHeight > 220) {
+          // Would overflow - just continue (shouldn't happen with 12 months)
+        }
+
+        const x = margin + col * colWidth;
+
+        // Month name (underlined)
+        doc.setTextColor(50, 74, 77);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`${monthNames[month]} ${year}`, x, currentY);
+        // Underline
+        const textWidth = doc.getTextWidth(`${monthNames[month]} ${year}`);
+        doc.setDrawColor(50, 74, 77);
+        doc.line(x, currentY + 1, x + textWidth, currentY + 1);
+
+        currentY += 5;
+
+        // List events
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        events.forEach((event) => {
+          const eventColor = event.type === 'legal' ? colors.legal :
+                            event.type === 'director' ? [100, 142, 35] as [number, number, number] :
+                            [180, 130, 0] as [number, number, number];
+          doc.setTextColor(...eventColor);
+          doc.text(`${event.day}: ${event.name}`, x + 3, currentY);
+          currentY += 4.5;
+        });
+
+        currentY += 3;
+      });
+
+      // Calendar Summary at bottom
+      const summaryY = 230;
       doc.setFillColor(249, 250, 251);
-      doc.roundedRect(margin, summaryY, pageWidth - 2 * margin, 55, 3, 3, 'F');
+      doc.roundedRect(margin, summaryY, pageWidth - 2 * margin, 40, 3, 3, 'F');
       doc.setDrawColor(200, 200, 200);
-      doc.roundedRect(margin, summaryY, pageWidth - 2 * margin, 55, 3, 3, 'S');
+      doc.roundedRect(margin, summaryY, pageWidth - 2 * margin, 40, 3, 3, 'S');
 
       doc.setTextColor(50, 74, 77);
-      doc.setFontSize(14);
+      doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
-      doc.text('Calendar Summary', margin + 5, summaryY + 10);
+      doc.text('Calendar Summary', margin + 5, summaryY + 8);
 
-      doc.setFontSize(11);
+      doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       const summaryItems: [string, number][] = [
         ['Work Days:', calData.workDays],
@@ -1171,58 +1223,19 @@ export default function NIACalendarReviewTool() {
         ['NR Days:', calData.nrDays],
         ['Total Contract Days:', calData.contractDays]
       ];
+
+      // Display in two rows
       summaryItems.forEach(([label, val], i) => {
-        const itemY = summaryY + 20 + i * 7;
+        const col = i % 3;
+        const row = Math.floor(i / 3);
+        const itemX = margin + 10 + col * 60;
+        const itemY = summaryY + 18 + row * 12;
         doc.setTextColor(80, 80, 80);
-        doc.text(label, margin + 10, itemY);
+        doc.text(label, itemX, itemY);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(50, 74, 77);
-        doc.text(val.toString(), margin + 80, itemY);
+        doc.text(val.toString(), itemX + 50, itemY, { align: 'right' });
         doc.setFont('helvetica', 'normal');
-      });
-
-      // NR Day assignments
-      const nrY = summaryY + 65;
-      doc.setTextColor(50, 74, 77);
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text('NR Day Assignments', margin, nrY);
-
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      calData.nrDates.forEach((d, i) => {
-        const dateObj = new Date(d + 'T00:00:00');
-        const dateText = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-        doc.setFillColor(254, 243, 199);
-        doc.roundedRect(margin, nrY + 5 + i * 8, pageWidth - 2 * margin, 7, 1, 1, 'F');
-        doc.setTextColor(146, 64, 14);
-        doc.text(dateText, margin + 3, nrY + 10 + i * 8);
-      });
-
-      // Legend at bottom
-      const legendY = nrY + 5 + calData.nrDates.length * 8 + 15;
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(50, 74, 77);
-      doc.text('Legend', margin, legendY);
-
-      const legendItems = [
-        { label: 'Legal Holiday', color: colors.legal },
-        { label: "Director's Holiday", color: colors.director },
-        { label: 'NR Day', color: colors.nr },
-        { label: 'Weekend', color: colors.weekend },
-      ];
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'normal');
-      legendItems.forEach((item, i) => {
-        const lx = margin + (i % 2) * 90;
-        const ly = legendY + 8 + Math.floor(i / 2) * 10;
-        doc.setFillColor(...item.color);
-        doc.rect(lx, ly - 4, 8, 6, 'F');
-        doc.setDrawColor(180, 180, 180);
-        doc.rect(lx, ly - 4, 8, 6, 'S');
-        doc.setTextColor(60, 60, 60);
-        doc.text(item.label, lx + 11, ly);
       });
     });
 
