@@ -975,21 +975,21 @@ export default function NIACalendarReviewTool() {
       header: [50, 74, 77] as [number, number, number]
     };
 
-    // Helper to get events for a month
+    // Helper to get events for a month (respects change requests)
     const getMonthEvents = (year: number, month: number, calType: 'aa' | 'op') => {
       const events: { day: number; name: string; type: string }[] = [];
       const lastDay = new Date(year, month + 1, 0).getDate();
       for (let d = 1; d <= lastDay; d++) {
         const dateStr = formatDate(new Date(year, month, d));
-        if (calendarData.legalHolidays[dateStr]) {
+        const effectiveType = getDayTypeForExport(dateStr, calType);
+
+        if (effectiveType === 'legal') {
           events.push({ day: d, name: calendarData.legalHolidays[dateStr], type: 'legal' });
-        } else if (calendarData.directorHolidays[dateStr]) {
-          events.push({ day: d, name: calendarData.directorHolidays[dateStr], type: 'director' });
-        } else {
-          const nrDates = calType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates;
-          if (nrDates.includes(dateStr)) {
-            events.push({ day: d, name: 'NR Day', type: 'nr' });
-          }
+        } else if (effectiveType === 'director') {
+          const name = calendarData.directorHolidays[dateStr] || "Director's Holiday";
+          events.push({ day: d, name, type: 'director' });
+        } else if (effectiveType === 'nr') {
+          events.push({ day: d, name: 'NR Day', type: 'nr' });
         }
       }
       return events;
@@ -1012,7 +1012,7 @@ export default function NIACalendarReviewTool() {
       const cellWidth = 5;
       const cellHeight = 4.5;
       const calendarWidth = cellWidth * 7;
-      const eventsWidth = 32; // Space for events list to the right
+      const eventsWidth = 45; // Space for events list to the right
       const blockWidth = calendarWidth + eventsWidth;
       const colSpacing = (pageWidth - 2 * margin - cols * blockWidth) / (cols - 1);
       const monthHeight = 40; // Height for each row
@@ -1137,7 +1137,7 @@ export default function NIACalendarReviewTool() {
             doc.setFont('helvetica', 'normal');
             // Truncate long event names
             let eventName = event.name;
-            if (eventName.length > 20) eventName = eventName.substring(0, 18) + '..';
+            if (eventName.length > 30) eventName = eventName.substring(0, 28) + '..';
             doc.text(`${event.day}: ${eventName}`, eventsX, headerY + 2 + i * 3.5);
           });
         }
@@ -1271,21 +1271,21 @@ export default function NIACalendarReviewTool() {
                        'July', 'August', 'September', 'October', 'November', 'December'];
     const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
-    // Helper to get events for a month
+    // Helper to get events for a month (respects change requests)
     const getMonthEventsHTML = (year: number, month: number, calType: 'aa' | 'op') => {
       const events: { day: number; name: string; color: string }[] = [];
       const lastDay = new Date(year, month + 1, 0).getDate();
       for (let d = 1; d <= lastDay; d++) {
         const dateStr = formatDate(new Date(year, month, d));
-        if (calendarData.legalHolidays[dateStr]) {
+        const effectiveType = getDayTypeForExport(dateStr, calType);
+
+        if (effectiveType === 'legal') {
           events.push({ day: d, name: calendarData.legalHolidays[dateStr], color: '#F79935' });
-        } else if (calendarData.directorHolidays[dateStr]) {
-          events.push({ day: d, name: calendarData.directorHolidays[dateStr], color: '#6B8E23' });
-        } else {
-          const nrDates = calType === 'aa' ? calendarData.calendars.aa.nrDates : calendarData.calendars.op.nrDates;
-          if (nrDates.includes(dateStr)) {
-            events.push({ day: d, name: 'NR Day', color: '#B45309' });
-          }
+        } else if (effectiveType === 'director') {
+          const name = calendarData.directorHolidays[dateStr] || "Director's Holiday";
+          events.push({ day: d, name, color: '#6B8E23' });
+        } else if (effectiveType === 'nr') {
+          events.push({ day: d, name: 'NR Day', color: '#B45309' });
         }
       }
       return events.map(e => `<div style="color:${e.color};font-size:11px;margin-top:2px;">${e.day}: ${e.name}</div>`).join('');
